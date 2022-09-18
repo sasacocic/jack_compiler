@@ -1,28 +1,20 @@
 use crate::*;
 use std::{
-    convert::AsRef,
     env,
     error::Error,
-    fs::{read_to_string, File},
-    io::{BufRead, BufReader, Bytes, Read, Write},
+    fs::File,
+    io::{stdin, stdout, BufReader, Read, Write},
     iter::Peekable,
-    ops::Deref,
-    path::{Path, PathBuf},
-    process::exit,
+    path::PathBuf,
 };
-
-// for now use a Box<dny Error> but checkout the anyhow crate
-type BoxError = Box<dyn std::error::Error>;
-type Result<T> = std::result::Result<T, BoxError>;
-type IOResult = std::result::Result<u8, std::io::Error>;
 
 // I want like a string literal type in keyword, because I know it's a fixed number of strings
 // I also don't want to do some dumb ass shit like mis-spell something on accident
 // was also thinking that a macro could maybe help with compile time check that way I can do
 // something like Token::Keyword(class!()) or keyword_token!("classs") - in this case I'd get
 // a compiler error because "classs" isn't a keyword
-#[derive(Debug)]
-enum Token {
+#[derive(Debug, Clone, PartialEq)]
+pub enum Token {
     // so keyword
     Keyword(String),
     Symbol(String),
@@ -31,12 +23,79 @@ enum Token {
     Identifier(String),
 }
 
+impl Token {
+    pub fn as_xml_string(&self) -> String {
+        match self {
+            Token::Symbol(ident) => match ident.as_str().chars().nth(0) {
+                Some('<') => "<symbol> &lt; </symbol>\n".to_string(),
+                Some('>') => "<symbol> &gt; </symbol>\n".to_string(),
+                Some('"') => "<symbol> &quot; </symbol>\n".to_string(),
+                Some('&') => "<symbol> &amp; </symbol>\n".to_string(),
+                _ => {
+                    format!("<symbol> {} </symbol>\n", ident)
+                }
+            },
+            Token::Keyword(keyword) => {
+                format!("<keyword> {} </keyword>\n", keyword)
+            }
+            Token::IntegerConstant(ident) => {
+                format!("<integerConstant> {} </integerConstant>\n", ident)
+            }
+            Token::StringConstant(ident) => {
+                format!("<stringConstant> {} </stringConstant>\n", ident)
+            }
+            Token::Identifier(ident) => {
+                format!("<identifier> {} </identifier>\n", ident)
+            }
+        }
+    }
+    // could just return &String - I don't need to clone a new one, because I
+    // only really ever read this value
+    pub fn get_value(&self) -> String {
+        match self {
+            Token::Symbol(ident) => match ident.as_str().chars().nth(0) {
+                Some('<') => "lt;".to_string(),
+                Some('>') => "gt;".to_string(),
+                Some('"') => "&quot".to_string(),
+                Some('&') => "&amp".to_string(),
+                _ => ident.clone(),
+            },
+            Token::Keyword(keyword) => keyword.clone(),
+            Token::IntegerConstant(ident) => ident.clone().to_string(),
+            Token::StringConstant(ident) => ident.clone(),
+            Token::Identifier(ident) => ident.clone(),
+        }
+    }
+}
+
+pub struct TokenIterator(Vec<Token>, usize);
+// pub struct TokenIterTwo(Iter<Token>) // thought I could just use Vec::iter or Vec::iter_mut methods ,but those give me references and I actually want to own the value
+
+impl Iterator for TokenIterator {
+    type Item = Token;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0.len() > self.1 {
+            let next = Some(self.0[self.1].clone());
+            self.1 += 1;
+            next
+        } else {
+            None
+        }
+    }
+}
+
+impl From<Vec<Token>> for TokenIterator {
+    fn from(token_vec: Vec<Token>) -> Self {
+        TokenIterator(token_vec, 0)
+    }
+}
+
 // basically the tokenizer should return a Vec of the tokens that's it
 // this way that the "CompilationEnginer" (aka parser) can easily read those
 // tokens
 // 1. probably a terrible idea to
-struct JackTokenizer {
-    f: BufReader<File>,
+pub struct JackTokenizer {
+    f: Option<BufReader<File>>,
 }
 
 /*
@@ -45,12 +104,16 @@ this is pretty annoying I just want something that has
 - next - next on iterator
  */
 impl JackTokenizer {
-    fn new(p: PathBuf) -> Result<Self> {
+    pub fn new(p: PathBuf) -> Result<Self> {
         // hopefully reading from the file is easy - I think it should be, but
         // reading to a string might be easier
         let f = File::open(p)?;
         let f = BufReader::new(f);
-        Ok(JackTokenizer { f })
+        Ok(JackTokenizer { f: Some(f) })
+    }
+
+    pub fn new_empty() -> Self {
+        JackTokenizer { f: None }
     }
 
     // want to see the next char.. but for that I have to keep
@@ -84,8 +147,9 @@ impl JackTokenizer {
             // .unwrap()
             .ok_or_else(|| <&str as Into<Box<dyn Error>>>::into("couldn't peek it's an error"))?
             .as_ref()
-            .map_err(|mut op: &std::io::Error| {
-                let oppp: &dyn Error = op;
+            // .map_err(|mut op: &std::io::Error| {
+            .map_err(|_| {
+                // let oppp: &dyn Error = op;
                 // just returning a string, because somehow &str can turn into -> Box<dyn Error>, but
                 // &Error (think &std::io::Error) -> Box<dyn Error> isn't possible, because of lifetime
                 "this error instead".into()
@@ -168,32 +232,72 @@ impl JackTokenizer {
     fn tokenize_before_symbol(string: &mut Vec<char>, tokens: &mut Vec<Token>) {
         let trimmed_string = string.iter().collect::<String>();
         let trimmed_string = trimmed_string.trim();
-        // dbg!(&tokens);
+        // dbg!(&tokens); // turn into trace if needed
         if !trimmed_string.is_empty() {
             let mut toks = Self::tokens_from_string(trimmed_string);
-            dbg!(&toks);
+            // dbg!(&toks); // turn into trace! if necessary
             tokens.append(toks.as_mut());
             string.clear();
         }
     }
 
-    fn tokenize(self) -> Result<Vec<Token>> {
-        let JackTokenizer { f: bytes } = self;
-        let mut bytes = bytes.bytes().peekable();
-        let mut tokens = Vec::new();
+    // can make jack_string a Into<PathBuf> ? but how do I know if I'm passing
+    // a file or string to evaluate
+    // also maybe a better name for this function is evaluate
+    pub fn run(self, jack_string: Option<impl Into<String>>) -> Result<Vec<Token>> {
+        // take a String or take Bytes<BufReader<File>> <- both of these are iterators
 
-        let mut string = Vec::new();
+        match jack_string {
+            Some(string) => {
+                let mut string: String = string.into();
+                // let JackTokenizer { f: bytes } = self;
+                // let mut bytes = string.bytes().peekable();
+                let mut bb = string.as_bytes();
+                let map_fn = |u8val: &u8| -> IOResult { return Ok(u8val.clone()) };
+                let pp = bb.iter().peekable().map(map_fn);
+                Self::tokenize(pp)
+            }
+            None => {
+                let JackTokenizer { f: bytes } = self;
+
+                let mut bytes = bytes
+                    .expect("a file to exist for jack toenizer")
+                    .bytes()
+                    .peekable();
+                Self::tokenize(bytes)
+            }
+        }
+    }
+
+    // pub fn tokenize(self, input: Peekable<std::io::Bytes<BufReader<File>>>) -> Result<Vec<Token>> {
+    pub fn tokenize(input: impl IntoIterator<Item = IOResult>) -> Result<Vec<Token>> {
+        let (mut tokens, mut string) = (Vec::new(), Vec::new());
+
+        let mut bytes = input.into_iter().peekable();
+
         loop {
             let next = Self::next(&mut bytes);
 
             match next {
                 None => {
                     // we're done if the next thing is None
+
+                    trace!("string at time of return: {:?}", string);
+                    // found the issue - basically not using things if they are left over?
+                    // also there is the question of is this even right?
+                    // like 1 + 2 + 3 -> probably isn't suppose to tokenize correctly?
+                    // but 1 + 2 + 3; -> is suppose to tokenize correctly
+                    // but for parsing I need 1 + 2 + 3 to give me everything
+
+                    // print!("string? {:?}", string);
+                    Self::tokenize_before_symbol(&mut string, &mut tokens);
                     return Ok(tokens);
                 }
                 Some(character) => {
                     match character {
-                        Err(e) => panic!("shuoldn't happen"),
+                        Err(e) => {
+                            panic!("don't know what to do with error: {}", e);
+                        }
                         Ok(character) => match character {
                             '{' => {
                                 Self::tokenize_before_symbol(&mut string, &mut tokens);
@@ -238,6 +342,10 @@ impl JackTokenizer {
                             '-' => {
                                 Self::tokenize_before_symbol(&mut string, &mut tokens);
                                 tokens.push(Token::Symbol("-".into()));
+                            }
+                            '~' => {
+                                Self::tokenize_before_symbol(&mut string, &mut tokens);
+                                tokens.push(Token::Symbol("~".into()));
                             }
                             '*' => {
                                 Self::tokenize_before_symbol(&mut string, &mut tokens);
@@ -310,7 +418,9 @@ impl JackTokenizer {
                                 Self::tokenize_before_symbol(&mut string, &mut tokens);
                                 tokens.push(Token::Symbol("_".into()));
                             }
-                            ' ' => {
+                            ' ' | '\n' => {
+                                // NOTE: I don't think I'll want this for newlines all the time actually.........
+
                                 // so what's happening if this is white space?
                                 // well it could just be white space at the beginning of a line
                                 // or the end of a line or it could be the case that the string
@@ -431,7 +541,8 @@ impl JackTokenizer {
     }
 }
 
-pub fn main() -> Result<()> {
+#[allow(dead_code)]
+pub fn main(jack_file_name: String, output_file_name: Option<String>) -> Result<()> {
     /*
     TOKENIZER / SCANNER is correct
     - would be good to write some unit tests as this would actually be useful for this
@@ -447,17 +558,108 @@ pub fn main() -> Result<()> {
 
     let arg: Vec<String> = env::args().collect();
 
-    let jack_file_name = arg.get(1).ok_or("file name not passed")?;
-    let output_file_name = arg.get(2);
+    // let jack_file_name = arg.get(1).ok_or("file name not passed")?;
+    // let output_file_name = arg.get(2);
 
     // return Err("this is bad".into());
-    let mut jack_tokenizer = JackTokenizer::new(PathBuf::from(jack_file_name))?;
-    let all_tokens = jack_tokenizer.tokenize()?;
+    let jack_tokenizer = JackTokenizer::new(PathBuf::from(jack_file_name.clone()))?;
+    // let all_tokens = jack_tokenizer.tokenize()?;
+    let t: Option<String> = None;
+    let all_tokens = jack_tokenizer.run(t)?;
     trace!("all tokens for: {}", jack_file_name);
     dbg!(&all_tokens);
     // can reuse pathbuf with referecne here - I don't think there's any reason
     // it needs to be comsumed
-    JackTokenizer::write_to_xml(all_tokens, output_file_name)?;
+    JackTokenizer::write_to_xml(all_tokens, output_file_name.as_ref())?;
 
     Ok(())
+}
+
+pub fn repl() -> Result<()> {
+    // what should this do? I should read a line from stdin
+
+    println!("Jack Repl: 0.0.1 (Rust Version)");
+
+    let mut character_stream = String::new();
+    loop {
+        stdout().write("ƛ ".as_bytes())?;
+        stdout().flush()?;
+        stdin().read_line(&mut character_stream)?;
+        // stdin().read_to_string(&mut character_stream)?;
+        dbg!(&character_stream);
+        // TODO: tokenize from input - probably good to think about how mulit-line things will
+        // work as well
+        let b = JackTokenizer::new_empty();
+        let toks = b.run(Some(character_stream.clone()));
+
+        dbg!(toks);
+
+        if character_stream.as_str() == "exit\n" {
+            break;
+        }
+        character_stream.clear();
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::arch::x86_64::_MM_EXCEPT_INEXACT;
+
+    use super::*;
+
+    #[test]
+    fn token_test() {
+        assert_eq!(Token::Symbol(")".into()), Token::Symbol(")".into()))
+    }
+
+    #[test]
+    fn test_string_one() -> Result<()> {
+        let parsed_value = JackTokenizer::new_empty().run(Some("1 + 2 + 3\n"))?;
+        let expected_value = vec![
+            Token::IntegerConstant(1),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(2),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(3),
+        ];
+        assert_eq!(parsed_value, expected_value);
+        Ok(())
+    }
+
+    #[test]
+    fn test_string_two() -> Result<()> {
+        let parsed_value = JackTokenizer::new_empty().run(Some("1 + 2 + 3"))?;
+
+        /*
+        - this is just a thought, but I could have a macro that returns the tokens in a vector
+        tok!(1 + 2 + 3); would return the below vector
+        */
+        let expected_value = vec![
+            Token::IntegerConstant(1),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(2),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(3),
+        ];
+        assert_eq!(parsed_value, expected_value);
+        Ok(())
+    }
+
+    #[test]
+    fn test_hello_jack_file() -> Result<()> {
+        let parsed_value = JackTokenizer::new("testing/personal_testing/hello.jack".into())?
+            .run(Option::<String>::None)?;
+        let expected_value = vec![
+            Token::Keyword("class".into()),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(2),
+            Token::Symbol("+".into()),
+            Token::IntegerConstant(3),
+        ];
+        dbg!(parsed_value);
+        // assert_eq!(parsed_value, expected_value);
+        Ok(())
+    }
 }
