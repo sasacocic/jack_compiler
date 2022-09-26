@@ -91,7 +91,7 @@ random stuff in them - I think I might be able to clean that up  (is builder goo
 
  */
 
-trait ProgramNode: Debug {
+pub trait ProgramNode: Debug {
     fn get_children(&self) -> &Option<Vec<Box<dyn ProgramNode>>>;
     fn get_children_mut(&mut self) -> &mut Option<Vec<Box<dyn ProgramNode>>>;
     fn set_empty_children(&mut self, children: Option<Vec<Box<dyn ProgramNode>>>);
@@ -162,14 +162,6 @@ impl<T: Clone> Node<T> {
             val,
             node_type: node_type.into(),
             children: children,
-        }
-    }
-
-    fn make_empty_node_type(r#type: impl Into<String>) -> Node<T> {
-        Node {
-            val: None,
-            node_type: r#type.into(),
-            children: None,
         }
     }
 
@@ -304,6 +296,8 @@ impl AST {
     // I'm going to end up consuming the object because that's easier
     // TODO: need to actually make my nodes match the grammar so I can easily out put
     // xml
+
+    #[allow(dead_code)]
     pub fn create_xml_file_from_ast(self, write_path: PathBuf) -> Result<()> {
         let mut f = File::create(write_path)?;
 
@@ -361,7 +355,7 @@ impl AST {
     }
 
     fn parse_class_var_dec(&mut self) -> Box<dyn ProgramNode> {
-        let mut static_or_field: Box<Node<Token>> = self.next().expect("a type").into();
+        let static_or_field: Box<Node<Token>> = self.next().expect("a type").into();
         let mut class_var_dec_node = Node::<Token>::make_box_empty_node_type("classVarDec");
         class_var_dec_node.push(static_or_field);
 
@@ -487,7 +481,7 @@ impl AST {
         var_dec_node.push(var_name);
 
         let comma = self.peek().expect("closing comma").get_value();
-        while "," == self.peek().expect("closing comma").get_value().as_str() {
+        while "," == comma.as_str() {
             let comma: Box<Node<Token>> = self.next().expect("comma").into();
             var_dec_node.push(comma);
             let var_name = self.parse_var_name();
@@ -1051,12 +1045,17 @@ pub fn repl() -> Result<()> {
     loop {
         print!("> ");
         let mut buf = String::new();
-        let inp = stdin().read_line(&mut buf)?;
+        stdin().read_line(&mut buf)?;
+
+        if buf == "exit" {
+            break;
+        }
 
         let scan = scanner::JackTokenizer::new_empty();
         let toks = scan.run(Some(buf))?;
 
-        let ast = AST::new(toks);
+        // TODO: this isn't even being used
+        let _ast = AST::new(toks);
 
         panic!("not sure how to parse the tokens, because it's not clear what I can get.... expressoin class etc.");
         // let parsed_output = ast.
@@ -1367,10 +1366,4 @@ mod tests {
 
         Ok(())
     }
-
-
-
-
-
-
 }

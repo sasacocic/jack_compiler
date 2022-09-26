@@ -1,6 +1,5 @@
 use crate::*;
 use std::{
-    env,
     error::Error,
     fs::File,
     io::{stdin, stdout, BufReader, Read, Write},
@@ -249,10 +248,10 @@ impl JackTokenizer {
 
         match jack_string {
             Some(string) => {
-                let mut string: String = string.into();
+                let string: String = string.into();
                 // let JackTokenizer { f: bytes } = self;
                 // let mut bytes = string.bytes().peekable();
-                let mut bb = string.as_bytes();
+                let bb = string.as_bytes();
                 let map_fn = |u8val: &u8| -> IOResult { return Ok(u8val.clone()) };
                 let pp = bb.iter().peekable().map(map_fn);
                 Self::tokenize(pp)
@@ -260,7 +259,7 @@ impl JackTokenizer {
             None => {
                 let JackTokenizer { f: bytes } = self;
 
-                let mut bytes = bytes
+                let bytes = bytes
                     .expect("a file to exist for jack toenizer")
                     .bytes()
                     .peekable();
@@ -541,27 +540,18 @@ impl JackTokenizer {
     }
 }
 
-#[allow(dead_code)]
 pub fn main(jack_file_name: String, output_file_name: Option<String>) -> Result<()> {
     /*
-    TOKENIZER / SCANNER is correct
+    TODOS:
+    - what should main function actually do?
+    - remove all the warnings
     - would be good to write some unit tests as this would actually be useful for this
     - also would be good to refactor this code as it's not very easy to understand I think
     - Remove all these comments as they're kinda useless
      */
 
-    // tbh the compile time check isn't even really worth it I think - I don't even
-    // know how I could do that - unless I make methods that create
-    // let jj = make_token!("keyword", "hello");
-
     trace!("tokenizer starting");
 
-    let arg: Vec<String> = env::args().collect();
-
-    // let jack_file_name = arg.get(1).ok_or("file name not passed")?;
-    // let output_file_name = arg.get(2);
-
-    // return Err("this is bad".into());
     let jack_tokenizer = JackTokenizer::new(PathBuf::from(jack_file_name.clone()))?;
     // let all_tokens = jack_tokenizer.tokenize()?;
     let t: Option<String> = None;
@@ -592,7 +582,7 @@ pub fn repl() -> Result<()> {
         let b = JackTokenizer::new_empty();
         let toks = b.run(Some(character_stream.clone()));
 
-        dbg!(toks);
+        dbg!(toks?);
 
         if character_stream.as_str() == "exit\n" {
             break;
@@ -605,8 +595,6 @@ pub fn repl() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::arch::x86_64::_MM_EXCEPT_INEXACT;
-
     use super::*;
 
     #[test]

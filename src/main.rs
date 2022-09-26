@@ -8,7 +8,7 @@ mod scanner;
 mod utils;
 
 use clap::Parser;
-use log::{debug, info, trace};
+use log::{debug, trace};
 use std::fmt::Debug;
 use std::str::FromStr;
 
@@ -74,7 +74,13 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // let jb: Box<dyn std::error::Error> = "hello".into();
     // let jj = <&str as Into<Box<dyn std::error::Error>>>::into("hello");
 
-    // take cli arguments
+    /*
+    how do I want this to work?
+    bn = the name of the binary / command
+    1. bn [options] [[scanner [-o]] [parer]] <jack_file_path>
+    -> options -> no options as this point
+    -> sccanner -o / --output-file - filename where the tokenizer will output the tokenized output
+     */
 
     let args = Args::parse();
 
