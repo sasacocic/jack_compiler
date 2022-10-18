@@ -1,11 +1,14 @@
 use crate::*;
 use std::{
-    error::Error,
     fs::File,
     io::{stdin, stdout, BufReader, Read, Write},
     iter::Peekable,
     path::PathBuf,
 };
+
+// NOTE: I spend a bunch of time on the below trying to make this work at compile time with macros
+// but it didn't really work out how I expected, and I don't think it's possible ... idk
+// maybe it is possible and I just need to look at it again
 
 // I want like a string literal type in keyword, because I know it's a fixed number of strings
 // I also don't want to do some dumb ass shit like mis-spell something on accident
@@ -68,7 +71,6 @@ impl Token {
 }
 
 pub struct TokenIterator(Vec<Token>, usize);
-// pub struct TokenIterTwo(Iter<Token>) // thought I could just use Vec::iter or Vec::iter_mut methods ,but those give me references and I actually want to own the value
 
 impl Iterator for TokenIterator {
     type Item = Token;
@@ -89,97 +91,53 @@ impl From<Vec<Token>> for TokenIterator {
     }
 }
 
-// basically the tokenizer should return a Vec of the tokens that's it
-// this way that the "CompilationEnginer" (aka parser) can easily read those
-// tokens
-// 1. probably a terrible idea to
+/*
+TODO: this class is kind of a mess...
+ergonomically it's not great? I should look at that Rust API thing
+maybe it actually has some good recomendations: https://rust-lang.github.io/api-guidelines/ <- these are the guidlines
+ */
 pub struct JackTokenizer {
     f: Option<BufReader<File>>,
 }
 
-/*
-this is pretty annoying I just want something that has
-- peek - nth on iterator
-- next - next on iterator
- */
 impl JackTokenizer {
     pub fn new(p: PathBuf) -> Result<Self> {
-        // hopefully reading from the file is easy - I think it should be, but
-        // reading to a string might be easier
-        let f = File::open(p)?;
-        let f = BufReader::new(f);
+        let f = BufReader::new(File::open(p)?);
         Ok(JackTokenizer { f: Some(f) })
     }
 
+    // only have this, because repl...
     pub fn new_empty() -> Self {
         JackTokenizer { f: None }
     }
 
-    // want to see the next char.. but for that I have to keep
-    // an index into the buffer reader right?
-    // fn peek(pos: usize, b: &mut Bytes<BufReader<File>>) -> Result<char> {
-    // fn peek(pos: usize, b: &mut impl Iterator<Item = IOResult>) -> Result<char> {
+    // this method is one of the biggest cluster fucks. Need to look how I
+    // can make simpler
     fn peek(b: &mut Peekable<impl Iterator<Item = IOResult>>) -> Result<char> {
-        // let bb = b.nth(self.pos);
-        // bb.map(|f| f.map_err(|v| Box::new(v).into()).map(|op| op as char))
-        // b.nth(pos).unwrap().map(|o| o as char).map_err(|v| v.into())
-
-        // let vv = b.peek();
-        // match vv {
-        //     Some(v) => {
-        //         let v = v.as_ref();
-        //         let j = v.map(|&u8Inside| u8Inside as char);
-        //         let b = j.map_err(|err| err.into());
-        //         b
-        //     }
-        //     None => Err("bad".into()),
-        // }
-        // let v = b.peek().ok_or(Box::new(Err("nothing to peek".into())));
-        // b.peek().unwrap().map_err(|e| e.into())
-        // let vbb = vv.map_err(|err| err.into());
-        // let jj = vbb.map(|ok| ok.clone());
-
-        // let l  = b.peek().unwrap().as_ref().map_err(|op| <std::io::Error as Error>::from(op));
-        // map err -> Box<dyn Error>
-        let l = b
+        let next = b
             .peek()
-            // .unwrap()
-            .ok_or_else(|| <&str as Into<Box<dyn Error>>>::into("couldn't peek it's an error"))?
+            .ok_or_else(|| CatchAllError::Generic("thing random thing...".into()))?
             .as_ref()
-            // .map_err(|mut op: &std::io::Error| {
             .map_err(|_| {
-                // let oppp: &dyn Error = op;
-                // just returning a string, because somehow &str can turn into -> Box<dyn Error>, but
-                // &Error (think &std::io::Error) -> Box<dyn Error> isn't possible, because of lifetime
-                "this error instead".into()
-                // somehow I need to go from &Error into Box<dyn Error>
+                let error_placeholder: anyhow::Error =
+                    CatchAllError::Generic("this erorr instead".into()).into();
+                error_placeholder
             });
 
-        let bb: Result<char> = l.and_then(|inside| Ok(inside.clone().into()));
-        // let bb: std::result::Result<char, BoxError> =
-        //     l.and_then(|inside| Ok(inside.clone().into()));
-
-        bb
-        // let j = l.map_err(|op| op.into());
-        // j
+        next.and_then(|inside| Ok(inside.clone().into()))
     }
 
-    // fn next(pos: &mut usize, b: &mut Bytes<BufReader<File>>) -> Option<Result<char>> {
     fn next(b: &mut impl Iterator<Item = IOResult>) -> Option<Result<char>> {
-        // honestly if the cast goes wrong I think this literally panics - so if something
-        // isn't utf-8 encoded :(
-        // let s = b.next();
         b.next()
             .map(|v| v.map(|vv| vv as char).map_err(|err| err.into()))
     }
 
     fn tokens_from_string(trimmed_string: &str) -> Vec<Token> {
-        // assuming the string will always be trimmed
+        // assuming the string will always be trimmed - shouls panic or bail if it isn't
 
         trace!("trimmed_string at start: {}", trimmed_string);
         let mut v = Vec::new();
 
-        // split on white space
         let possible_tokens = trimmed_string.split(" ");
 
         for possible_token in possible_tokens {
@@ -220,7 +178,6 @@ impl JackTokenizer {
                     None => panic!("string literal could not be parse"),
                 }
             } else {
-                // it must be an identifier
                 v.push(Token::Identifier(possible_token.to_string()));
             }
         }
@@ -231,26 +188,19 @@ impl JackTokenizer {
     fn tokenize_before_symbol(string: &mut Vec<char>, tokens: &mut Vec<Token>) {
         let trimmed_string = string.iter().collect::<String>();
         let trimmed_string = trimmed_string.trim();
-        // dbg!(&tokens); // turn into trace if needed
         if !trimmed_string.is_empty() {
             let mut toks = Self::tokens_from_string(trimmed_string);
-            // dbg!(&toks); // turn into trace! if necessary
             tokens.append(toks.as_mut());
             string.clear();
         }
     }
 
-    // can make jack_string a Into<PathBuf> ? but how do I know if I'm passing
-    // a file or string to evaluate
-    // also maybe a better name for this function is evaluate
     pub fn run(self, jack_string: Option<impl Into<String>>) -> Result<Vec<Token>> {
         // take a String or take Bytes<BufReader<File>> <- both of these are iterators
 
         match jack_string {
             Some(string) => {
                 let string: String = string.into();
-                // let JackTokenizer { f: bytes } = self;
-                // let mut bytes = string.bytes().peekable();
                 let bb = string.as_bytes();
                 let map_fn = |u8val: &u8| -> IOResult { return Ok(u8val.clone()) };
                 let pp = bb.iter().peekable().map(map_fn);
@@ -268,7 +218,6 @@ impl JackTokenizer {
         }
     }
 
-    // pub fn tokenize(self, input: Peekable<std::io::Bytes<BufReader<File>>>) -> Result<Vec<Token>> {
     pub fn tokenize(input: impl IntoIterator<Item = IOResult>) -> Result<Vec<Token>> {
         let (mut tokens, mut string) = (Vec::new(), Vec::new());
 
@@ -481,7 +430,7 @@ impl JackTokenizer {
         }
     }
 
-    fn write_to_xml(tokens: Vec<Token>, output_file: Option<&String>) -> Result<()> {
+    fn write_to_xml(tokens: Vec<Token>, output_file: Option<&PathBuf>) -> Result<()> {
         let mut xml_f = match output_file {
             Some(file_name) => {
                 trace!("created (or truncating) to: {:?}", &output_file);
@@ -497,7 +446,7 @@ impl JackTokenizer {
         // just an idea is a warp macro basically you give it an
         // identifier then it writes that identifier and evalutaes the
         // value between it for xml_write!(identifier) -> "<identifer> {eval identifier} </identifier>"
-        //
+        // TODO: do the above
         for token in tokens {
             match token {
                 Token::Symbol(ident) => match ident.as_str().chars().nth(0) {
@@ -540,7 +489,7 @@ impl JackTokenizer {
     }
 }
 
-pub fn main(jack_file_name: String, output_file_name: Option<String>) -> Result<()> {
+pub fn main(jack_file_name: PathBuf, output_file_name: Option<PathBuf>) -> Result<()> {
     /*
     TODOS:
     - what should main function actually do?
@@ -556,7 +505,7 @@ pub fn main(jack_file_name: String, output_file_name: Option<String>) -> Result<
     // let all_tokens = jack_tokenizer.tokenize()?;
     let t: Option<String> = None;
     let all_tokens = jack_tokenizer.run(t)?;
-    trace!("all tokens for: {}", jack_file_name);
+    trace!("all tokens for: {:?}", jack_file_name);
     dbg!(&all_tokens);
     // can reuse pathbuf with referecne here - I don't think there's any reason
     // it needs to be comsumed

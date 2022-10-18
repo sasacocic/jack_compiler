@@ -3,85 +3,17 @@ use std::any::Any;
 use std::fs::File;
 use std::io::{stdin, Write};
 use std::iter::Peekable;
-use std::path::PathBuf;
-use std::{vec};
+use std::path::{PathBuf};
 
 use crate::*;
 
 use crate::scanner::{JackTokenizer, Token, TokenIterator};
 
-/*
-
-- need to output xml for the parse tree, buy maybe I should put it into
-a tree as well - in fact I want to do that for my own practice / something
-I want to do.
-
-
-
-// parsing logic
-
-
-- basically how we are going to do this is 1 function for just about
-1 non terminal rule in the grammar - this is acutally the same thing that is
-done in crafting interpreters
-
-
-LL grammar: can be parsed by a recursive descent parser without backtracking
-- this is the case with jack - idk about other grammars though
-
-
-
-
-
-basically for the jack implementation make a function for each non-terminal rule then just call
-that rule to make the tree - from here I can have print_xml method for the tree which will print
-it in XML. Not sure how different languages will implement these things. Rest of this is just
-looking at the jack grammar
-
-lexical elements
-- keywords
-- symbols
-- integerConstant
-- StringConstant
-- identifier
-
-theses are all the tokens
-
-program structure
-
-A jack program is a collection of classes, each appearing in a separate file, and each compiled separately.
-each class is structured as follows
-
-class: 'class' className '{' classVarDec* subroutineDec* '}'
-classVarDec: ('static'|'field') type varName (','varName)* ';'
-type: 'int'|'char'|'boolean'|className
-subroutineDec: ('constructor'|'function'|'method') ('void'|type) subroutineName '(' parameterList ')' subroutineBody
-
-.. more
-
-Statements
-A jack program includes statements, as follows
-
-statements: statement*
-statement: letStatement | ifStatement| whileStatement | doStatement| returnStatement
-
-Expressions
-A jack program includes expressions, as follows
-
-expression: term (op term)*
-
-*/
-
-/*
-- I want to have a in memory tree that I use - and I want to build it and derive the xml from that
-I was thinking I would have nodes that implement a trait called ProgramNode and have them inherit that
-and just put all of those in the tree, and from there figure shit out??? More importantly just do something
-and see what happens
- */
+// Jack grammar can be found in the nand2tetris book (elemetns of computing systems)
 
 /*
 TODOS:
-1. test this thing is actually correct
+1. Figure out a way to acutally unit test this stuff methods independently
 - good way to test small things is to write tests with small test programs or rules
 - use the repl
 2. refactor - there's a lot of things in here that are repeats or could be
@@ -111,7 +43,7 @@ pub trait ProgramNode: Debug {
 /*
 had to make T static? Wtf? I mean it doesn't need to live the whole life of the program
 and honeslty the lifetime here won't make it live the whole life of the program infact it'll
-just make the compile stop complaing - T only needs to live as long as Node?
+just make the compiler stop complaing - T only needs to live as long as Node?
  */
 #[derive(Debug)]
 struct Node<T: Clone + 'static> {
@@ -1004,7 +936,7 @@ impl AST {
     }
 }
 
-pub fn main(jack_file_path: String) -> Result<()> {
+pub fn main(jack_file_path: PathBuf) -> Result<()> {
     // needs to take in a file to read
     // then tokenize it (using the scanner)
     // then create a parse tree from that
