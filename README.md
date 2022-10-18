@@ -1,3 +1,7 @@
+# TODO
+
+explain how to actually use this
+
 # Jack Compiler
 
 This is an implementation of the Jack programming language from nand2tetris
