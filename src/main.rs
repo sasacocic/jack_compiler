@@ -9,7 +9,7 @@ use cmd::{DebugSubCmd, LogLevels, Mode, Part, Repl};
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use log::{debug, info, trace};
+use log::{debug, trace};
 use std::fmt::Debug;
 use std::str::FromStr;
 
